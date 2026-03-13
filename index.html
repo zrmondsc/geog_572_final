@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Huge Basketball Court</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link
+    href="https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.css"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h1>Huge Basketball Court</h1>
+      <p>
+        Interactive cartography prototype for mapping basketball events onto a
+        giant court over North America.
+      </p>
+
+      <div class="control-group">
+        <label>
+          <input type="checkbox" id="toggle-court-fill" checked />
+          Court fill
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          <input type="checkbox" id="toggle-court-lines" checked />
+          Court lines
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          <input type="checkbox" id="toggle-labels" checked />
+          Court labels
+        </label>
+      </div>
+
+      <button id="reset-view">Reset View</button>
+
+      <hr />
+
+    </aside>
+
+    <main id="map"></main>
+  </div>
+      <div id="player-controls" class="player-controls">
+        <div class="control-row">
+            <label for="player-filter">Player</label>
+            <select id="player-filter">
+             <option value="__all__">All players</option>
+            </select>
+        </div>
+
+        <div class="control-row">
+            <label for="time-slider">Frame</label>
+            <input id="time-slider" type="range" min="0" max="0" step="1" value="0" />
+            <span id="time-readout">0</span>
+        </div>
+
+        <div class="control-row">
+            <button id="play-pause-btn" type="button">Play</button>
+        </div>
+    </div>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.js"></script>
+  <script src="./js/main.js"></script>
+</body>
+</html>

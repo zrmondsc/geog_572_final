@@ -1,0 +1,8 @@
+Huge Basketball and the Great American Road Trip.pptx
+data/processed/player_positions_downsampled_10_frames.csv
+data/processed/player_positions.csv
+data/processed/player_itineraries.json
+data/processed/player_itineraries_downsampled_10_frames.json
+data/processed/player_itineraries_downsampled_25_frames.json
+data/external/0021500001.json
+python/01_process_player_tracking_data.ipynb
