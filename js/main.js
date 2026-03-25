@@ -539,7 +539,7 @@ function togglePlayback() {
 
     playInterval = window.setInterval(() => {
       stepForwardFrame();
-    }, 250);
+    }, 100);
   } else {
     if (btn) btn.textContent = "Play";
 
