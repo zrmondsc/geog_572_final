@@ -1,13 +1,13 @@
 const CONFIG = {
   courtGeojsonPath: "data/external/huge_basketball_court.geojson",
   playerJsonPath: "data/processed/player_itineraries_downsampled_25_frames_huge.json",
+  boundariesGeojsonPath: "data/processed/boundaries_p_2021_v3.geojson",
   initialCenter: [-98, 39],
   initialZoom: 2.9,
   initialPitch: 45,
   initialBearing: -8,
   style: "mapbox://styles/mondschz/cmmnxu9ij006p01suafybg2ip"
 };
-
 
 const LAYERS = {
   courtFill: "court-fill",
@@ -17,16 +17,12 @@ const LAYERS = {
   playerLabels: "player-labels"
 };
 
-
-
 // =====================================
 // Huge Basketball Court - Mapbox GL JS
 // =====================================
 
-// Replace this with your own Mapbox public token
 mapboxgl.accessToken = "pk.eyJ1IjoibW9uZHNjaHoiLCJhIjoiY21tNThyenZuMDFyMDJ4b3M3MWFqdXFqbSJ9.5dpIdeNz2kqHx7nN0uNnFA";
 
-// Build map
 const map = new mapboxgl.Map({
   container: "map",
   style: CONFIG.style,
@@ -49,14 +45,35 @@ let frameList = [];
 let currentFrame = null;
 let isPlaying = false;
 let playInterval = null;
+let boundariesData = null;
 
 // -----------------------------
 // Helpers
 // -----------------------------
+function formatRealTime(frame) {
+  const totalSeconds = frame / 25;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function prettifyCourtLabel(value) {
+  if (!value) return "";
+  return String(value)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function computeBoundsFromGeoJSON(geojson) {
   const bounds = new mapboxgl.LngLatBounds();
 
-  for (const feature of geojson.features) {
+  for (const feature of geojson.features || []) {
     if (!feature.geometry) continue;
     const geom = feature.geometry;
 
@@ -85,108 +102,129 @@ function setLayerVisibility(layerId, visible) {
   map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
 }
 
-function addCourtSource(data) {
-  if (map.getSource("court")) return;
+function getPlayerById(playerId) {
+  return playerIndex.find(p => String(p.player_id) === String(playerId)) || null;
+}
+
+function addCourtSource(courtGeojson) {
+  courtGeojson.features.forEach(feature => {
+    const rawName =
+      feature?.properties?.name ??
+      feature?.properties?.label ??
+      "";
+
+    feature.properties = feature.properties || {};
+    feature.properties.display_name = prettifyCourtLabel(rawName);
+  });
+
+  if (map.getSource("court")) {
+    map.getSource("court").setData(courtGeojson);
+    return;
+  }
 
   map.addSource("court", {
     type: "geojson",
-    data
+    data: courtGeojson
   });
 }
 
 function addCourtLayers() {
   const featureName = safeNameExpression();
 
-  // Filled areas
-  map.addLayer({
-    id: LAYERS.courtFill,
-    type: "fill",
-    source: "court",
-    paint: {
-      "fill-color": [
-        "case",
+  if (!map.getLayer(LAYERS.courtFill)) {
+    map.addLayer({
+      id: LAYERS.courtFill,
+      type: "fill",
+      source: "court",
+      paint: {
+        "fill-color": [
+          "case",
 
-        ["==", featureName, "court surface"], "#c49a57",
+          ["==", featureName, "court surface"], "#c49a57",
 
-        ["any",
-          ["==", featureName, "north key"],
-          ["==", featureName, "south key"]
-        ], "#d7882f",
+          ["any",
+            ["==", featureName, "north key"],
+            ["==", featureName, "south key"]
+          ], "#d7882f",
 
-        ["==", featureName, "center circle"], "#cf7b24",
+          ["==", featureName, "center circle"], "#cf7b24",
 
-        ["any",
-          ["==", featureName, "north free throw circle"],
-          ["==", featureName, "south free throw circle"]
-        ], "#e0a14d",
+          ["any",
+            ["==", featureName, "north free throw circle"],
+            ["==", featureName, "south free throw circle"]
+          ], "#e0a14d",
 
-        ["any",
-          ["==", featureName, "north rim"],
-          ["==", featureName, "south rim"],
-          ["==", featureName, "center mark"]
-        ], "#f15a24",
+          ["any",
+            ["==", featureName, "north rim"],
+            ["==", featureName, "south rim"],
+            ["==", featureName, "center mark"]
+          ], "#f15a24",
 
-        "#d9d4c8"
-      ],
-      "fill-opacity": [
-        "case",
-        ["==", featureName, "court surface"], 0.82,
-        0.55
-      ]
-    }
-  });
-
-  // Court outlines / lines
-  map.addLayer({
-    id: LAYERS.courtLine,
-    type: "line",
-    source: "court",
-    paint: {
-      "line-color": [
-        "case",
-        ["any",
-          ["==", featureName, "north rim"],
-          ["==", featureName, "south rim"],
-          ["==", featureName, "center mark"]
+          "#d9d4c8"
         ],
-        "#ff6b2d",
-        "#fff6df"
-      ],
-      "line-width": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        2, 1,
-        4, 2,
-        6, 3,
-        8, 5
-      ]
-    }
-  });
+        "fill-opacity": [
+          "case",
+          ["==", featureName, "court surface"], 0.82,
+          0.55
+        ]
+      }
+    });
+  }
 
-  // Labels
-  map.addLayer({
-    id: LAYERS.courtLabel,
-    type: "symbol",
-    source: "court",
-    layout: {
-      "text-field": ["coalesce", ["get", "name"], ["get", "label"], ""],
-      "text-size": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        2, 10,
-        4, 12,
-        6, 14
-      ],
-      "text-allow-overlap": false
-    },
-    paint: {
-      "text-color": "#ffffff",
-      "text-halo-color": "#111111",
-      "text-halo-width": 1.2
-    }
-  });
+  if (!map.getLayer(LAYERS.courtLine)) {
+    map.addLayer({
+      id: LAYERS.courtLine,
+      type: "line",
+      source: "court",
+      paint: {
+        "line-color": [
+          "case",
+          ["any",
+            ["==", featureName, "north rim"],
+            ["==", featureName, "south rim"],
+            ["==", featureName, "center mark"]
+          ],
+          "#ff6b2d",
+          "#fff6df"
+        ],
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          2, 1,
+          4, 2,
+          6, 3,
+          8, 5
+        ]
+      }
+    });
+  }
+
+  if (!map.getLayer(LAYERS.courtLabel)) {
+    map.addLayer({
+      id: LAYERS.courtLabel,
+      type: "symbol",
+      source: "court",
+      filter: ["!=", ["get", "display_name"], "Court Surface"],
+      layout: {
+        "text-field": ["get", "display_name"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          2, 10,
+          4, 12,
+          6, 14
+        ],
+        "text-allow-overlap": false
+      },
+      paint: {
+        "text-color": "#ffffff",
+        "text-halo-color": "#111111",
+        "text-halo-width": 1.2
+      }
+    });
+  }
 }
 
 function bindCourtInteractions() {
@@ -195,7 +233,8 @@ function bindCourtInteractions() {
     if (!feature) return;
 
     const props = feature.properties || {};
-    const name = props.name || props.label || "Court feature";
+    const rawName = props.name || props.label || "Court feature";
+    const name = prettifyCourtLabel(rawName);
     const type = props.feature_type || props.type || feature.geometry?.type || "unknown";
 
     new mapboxgl.Popup()
@@ -222,27 +261,35 @@ function wireUI() {
   const labelToggle = document.getElementById("toggle-labels");
   const resetBtn = document.getElementById("reset-view");
 
-  fillToggle.addEventListener("change", (e) => {
-    setLayerVisibility(LAYERS.courtFill, e.target.checked);
-  });
-
-  lineToggle.addEventListener("change", (e) => {
-    setLayerVisibility(LAYERS.courtLine, e.target.checked);
-  });
-
-  labelToggle.addEventListener("change", (e) => {
-    setLayerVisibility(LAYERS.courtLabel, e.target.checked);
-  });
-
-  resetBtn.addEventListener("click", () => {
-    if (!courtBounds) return;
-    map.fitBounds(courtBounds, {
-      padding: 40,
-      pitch: CONFIG.initialPitch,
-      bearing: CONFIG.initialBearing,
-      duration: 1200
+  if (fillToggle) {
+    fillToggle.addEventListener("change", (e) => {
+      setLayerVisibility(LAYERS.courtFill, e.target.checked);
     });
-  });
+  }
+
+  if (lineToggle) {
+    lineToggle.addEventListener("change", (e) => {
+      setLayerVisibility(LAYERS.courtLine, e.target.checked);
+    });
+  }
+
+  if (labelToggle) {
+    labelToggle.addEventListener("change", (e) => {
+      setLayerVisibility(LAYERS.courtLabel, e.target.checked);
+    });
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      if (!courtBounds) return;
+      map.fitBounds(courtBounds, {
+        padding: 40,
+        pitch: CONFIG.initialPitch,
+        bearing: CONFIG.initialBearing,
+        duration: 1200
+      });
+    });
+  }
 }
 
 async function loadCourtData() {
@@ -255,7 +302,6 @@ async function loadCourtData() {
   courtBounds = computeBoundsFromGeoJSON(courtData);
 }
 
-
 async function loadPlayerData() {
   const response = await fetch(CONFIG.playerJsonPath);
   if (!response.ok) {
@@ -263,6 +309,7 @@ async function loadPlayerData() {
   }
 
   playerData = await response.json();
+
   playerIndex = Object.values(playerData).sort((a, b) =>
     (a.player_name || "").localeCompare(b.player_name || "")
   );
@@ -271,7 +318,9 @@ async function loadPlayerData() {
 
   for (const player of playerIndex) {
     for (const step of (player.trajectory || [])) {
-      frameSet.add(step.frame_idx);
+      if (step.frame_idx !== undefined && step.frame_idx !== null) {
+        frameSet.add(step.frame_idx);
+      }
     }
   }
 
@@ -280,6 +329,15 @@ async function loadPlayerData() {
   if (frameList.length > 0) {
     currentFrame = frameList[0];
   }
+}
+
+async function loadBoundariesData() {
+  const response = await fetch(CONFIG.boundariesGeojsonPath);
+  if (!response.ok) {
+    throw new Error(`Failed to load boundaries GeoJSON: ${response.status} ${response.statusText}`);
+  }
+
+  boundariesData = await response.json();
 }
 
 function buildPlayerFeatures(frameIdx, selectedPlayerId = "__all__") {
@@ -374,7 +432,7 @@ function addPlayerSourceAndLayers() {
       layout: {
         "text-field": [
           "coalesce",
-          ["get", "jersey"],
+          ["to-string", ["get", "jersey"]],
           ["get", "player_name"]
         ],
         "text-size": [
@@ -402,11 +460,26 @@ function populatePlayerFilter() {
   const select = document.getElementById("player-filter");
   if (!select) return;
 
+  const currentValue = select.value || "__all__";
+
+  select.innerHTML = "";
+
+  const allOption = document.createElement("option");
+  allOption.value = "__all__";
+  allOption.textContent = "All players";
+  select.appendChild(allOption);
+
   for (const player of playerIndex) {
     const option = document.createElement("option");
     option.value = String(player.player_id);
     option.textContent = `${player.player_name} (${player.team_abbr || ""})`;
     select.appendChild(option);
+  }
+
+  if (Array.from(select.options).some(opt => opt.value === currentValue)) {
+    select.value = currentValue;
+  } else {
+    select.value = "__all__";
   }
 }
 
@@ -418,7 +491,7 @@ function getSelectedPlayerId() {
 function updateTimeReadout(frameIdx) {
   const readout = document.getElementById("time-readout");
   if (readout) {
-    readout.textContent = frameIdx;
+    readout.textContent = formatRealTime(frameIdx);
   }
 }
 
@@ -459,11 +532,17 @@ function togglePlayback() {
 
   if (isPlaying) {
     if (btn) btn.textContent = "Pause";
+
+    if (playInterval) {
+      window.clearInterval(playInterval);
+    }
+
     playInterval = window.setInterval(() => {
       stepForwardFrame();
     }, 250);
   } else {
     if (btn) btn.textContent = "Play";
+
     if (playInterval) {
       window.clearInterval(playInterval);
       playInterval = null;
@@ -491,6 +570,8 @@ function bindPlayerInteractions() {
         Shot clock: ${props.shot_clock ?? "N/A"}
       `)
       .addTo(map);
+
+    renderPlayerSummary(props.player_id);
   });
 
   map.on("mouseenter", LAYERS.playerPoints, () => {
@@ -525,6 +606,17 @@ function wirePlayerUI() {
   if (playerFilter) {
     playerFilter.addEventListener("change", () => {
       renderPlayersAtFrame(currentFrame);
+
+      const playerId = getSelectedPlayerId();
+      if (playerId !== "__all__") {
+        renderPlayerSummary(playerId);
+      } else {
+        const titleEl = document.getElementById("player-summary-title");
+        const statsEl = document.getElementById("player-summary-stats");
+
+        if (titleEl) titleEl.textContent = "Player summary";
+        if (statsEl) statsEl.innerHTML = "";
+      }
     });
   }
 
@@ -533,6 +625,92 @@ function wirePlayerUI() {
       togglePlayback();
     });
   }
+}
+
+// function getPointAdmin(x, y) {
+//   if (!boundariesData || !boundariesData.features) return null;
+
+//   const pt = turf.point([x, y]);
+
+//   for (const feature of boundariesData.features) {
+//     if (!feature.geometry) continue;
+
+//     try {
+//       if (turf.booleanPointInPolygon(pt, feature)) {
+//         return {
+//           country: feature.properties?.COUNTRY || null,
+//           state: feature.properties?.STATEABB || null,
+//           stateName: feature.properties?.NAME_En || null
+//         };
+//       }
+//     } catch (err) {
+//       console.warn("Point-in-polygon failed for boundary feature:", err);
+//     }
+//   }
+
+//   return null;
+// }
+
+function computePlayerSummary(player) {
+  const trajectory = (player.trajectory || [])
+    .filter(step =>
+      step.x_huge !== undefined && step.x_huge !== null &&
+      step.y_huge !== undefined && step.y_huge !== null
+    )
+    .sort((a, b) => a.frame_idx - b.frame_idx);
+
+  if (!trajectory.length) return null;
+
+  let totalDistanceKm = 0;
+  let prevCoord = null;
+
+  for (const step of trajectory) {
+    const coord = [step.x_huge, step.y_huge];
+
+    if (prevCoord) {
+      totalDistanceKm += turf.distance(
+        turf.point(prevCoord),
+        turf.point(coord),
+        { units: "kilometers" }
+      );
+    }
+
+    prevCoord = coord;
+  }
+
+  return {
+    player_id: player.player_id,
+    player_name: player.player_name || "",
+    totalDistanceKm,
+    borderCrossings: 0,
+    statesVisited: 0
+  };
+}
+
+function renderPlayerSummary(playerId) {
+  const player = getPlayerById(playerId);
+  if (!player) return;
+
+  const summary = computePlayerSummary(player);
+
+  const titleEl = document.getElementById("player-summary-title");
+  const statsEl = document.getElementById("player-summary-stats");
+
+  if (titleEl) {
+    titleEl.textContent = summary?.player_name || "";
+  }
+
+  if (!statsEl) return;
+
+  if (!summary) {
+    statsEl.innerHTML = `<div>No summary available.</div>`;
+    return;
+  }
+
+  statsEl.innerHTML = `
+    <div><strong>Total Distance Traveled:</strong> ${summary.totalDistanceKm.toFixed(1)} km</div>
+    <small>That's approximately ${(summary.totalDistanceKm / 768800).toFixed(1)} trips to the moon!</small>
+  `;
 }
 
 // -----------------------------
@@ -547,6 +725,10 @@ map.on("style.load", async () => {
     if (!playerData) {
       await loadPlayerData();
     }
+
+    // if (!boundariesData) {
+    //   await loadBoundariesData();
+    // }
 
     addCourtSource(courtData);
     addCourtLayers();
